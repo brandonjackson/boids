@@ -7,47 +7,110 @@
  */
 
 // sizes must be divisible by 100
- const BIN_SIZE = 100
- const CANVAS_WIDTH = 900
- const CANVAS_HEIGHT = 600
- const N_BOIDS = 100
- const DISPLAY_SIZE = 5
- 
- const SPEED = 2
- const BOUNDARY_SIZE = DISPLAY_SIZE * 4
- const SEPARATION_RADIUS = DISPLAY_SIZE * 4
- const LOCAL_RADIUS =  100
- const FORCE_SEPARATION = 0.03
- const FORCE_ALIGNMENT = 0.05
- const FORCE_COHESION = 0.02
- 
- const BIRD_VISION = true
- const BIRD_MAX_TRACKING = 7
- const BIRD_FOV = 161
+
+let options = {}
+
+options.N_BOIDS = 2000
+
+options.FORCE_SEPARATION = 0.05
+options.FORCE_ALIGNMENT = 0.05
+options.FORCE_COHESION = 0.02
+
+const BIN_SIZE = 50
+const CANVAS_WIDTH = 1400
+const CANVAS_HEIGHT = 700
+const N_BOIDS = 1000
+const DISPLAY_SIZE = 2
+
+options.SPEED = 3
+const BOUNDARY_SIZE = DISPLAY_SIZE * 10
+const SEPARATION_RADIUS = DISPLAY_SIZE * 4
+const LOCAL_RADIUS =  100
+
+options.LIMIT_FOV = false
+options.FOV = 161
+options.TRACK_WINGMEN = false
+options.WINGMEN = 7
+
+options.DONUT_MODE = true
+options.LOOKUP_TABLE = false
+
+let frame = 0
+
+
+options.reset = function(){
+    frame = 0
+    boids = []
+    for(let i = 0; i < options.N_BOIDS; i++){
+        boids.push(new Boid(i))
+    }
+    // console.log("done with reset()...dumping boids")
+    // console.log(boids)
+}
+
   
  const DEBUG_VIZ = false
  
  let boids = []
- let distanceMatrix = {}
- 
+ let lattice = {}
+ let distances = {}
  
  function setup() {
      angleMode(DEGREES);
      background(230);
      createCanvas(CANVAS_WIDTH, CANVAS_HEIGHT);
- 
-     for(let i = 0; i < N_BOIDS; i++){
-         boids.push(new Boid())
-     }
 
-     let localBoids = new BinLattice(boids,)
-     let nearbyBoidZero = lattice.getNearbyIds(LOCAL_RADIUS, boids[0].position.x, boids[0].position.y)
-     console.log(nearbyBoidZero)
- }
+     var gui = new dat.GUI();
+     gui.width = 330;
+     
+     let numberSlider = gui.add(options, 'N_BOIDS', 1, 2000)
+     numberSlider.onFinishChange(function(value){
+        options.reset()
+     });
+     gui.add(options, 'SPEED', 0, 10)
+     gui.add(options, 'DONUT_MODE')
+     gui.add(options, 'LOOKUP_TABLE')
+     gui.add(options, 'reset')
+
+
+     var f1 = gui.addFolder("Boid Forces");
+   
+     f1.add(options, 'FORCE_SEPARATION', 0, 0.2);
+     f1.add(options, 'FORCE_ALIGNMENT', 0, 0.2);
+     f1.add(options, 'FORCE_COHESION', 0, 0.2);
+
+     var f2 = gui.addFolder("Bird Vision");      
+     f2.add(options, 'LIMIT_FOV')
+     f2.add(options, 'FOV', 1, 360)
+     f2.add(options, 'TRACK_WINGMEN');
+     f2.add(options, 'WINGMEN', 1, 100)
+   
+    //  f1.add(sim, 'visibleLayer',[ 'heat', 'light', 'land' ]);
+    //  f1.add(sim, 'landFraction', 0, 1);
+    //  var resetPlanet = f1.add(sim, 'resetPlanet');
+    //  resetPlanet.name("🔄Redraw Planet");
+     
+    //  var f2 = gui.addFolder("Climate Controls");
+    //  var temp = f2.add(sim, 'temperature',0,100).listen();
+    //  temp.domElement.style.pointerEvents = "none";
+    //  temp.domElement.style.opacity = .5;
+    //  f2.add(sim, 'atmosophereStrength',0,1).listen();
+    //  var resetClimate = f2.add(sim, 'resetClimate');
+    //  resetClimate.name("🔀Randomize Heat")
+     f1.open();
+    //   f2.open();
+   
+ 
+    options.reset()
+}
  
  function draw() {
+    // console.log("frame: " + frame)
+    frame+=1
+
     clear()
-    distanceMatrix = computeDistanceMatrix(boids)
+    lattice = new BinLattice(boids)
+    distances = new DistanceLookup(boids)
  
      for(let i = 0; i < boids.length; i++){
         boids[i].update(boids)
@@ -56,8 +119,29 @@
      
  }
 
+ class DistanceLookup {
+     constructor(boids){
+         this.distances = {}
+         this.boids = boids
+         for(let i = 0; i < boids.length; i++){
+             this.distances[i] = Array(boids.length).fill(null)
+             this.distances[i][i] = 0
+         }
+        }
+    search(index1, index2){
+        if(this.distances[index1][index2] == null){
+            let distance = this.boids[index1].position.dist(this.boids[index2].position)
+            this.distances[index1][index2] = distance
+            this.distances[index2][index1] = distance
+        }
+        return this.distances[index1][index2]
+
+    }
+ }
+
  class BinLattice {
      constructor(boids){
+         this.boids = boids
          this.binsX = CANVAS_WIDTH / BIN_SIZE
          this.binsY = CANVAS_HEIGHT / BIN_SIZE
          this.bins = []
@@ -68,7 +152,7 @@
              }
          }
          for(let boidIndex = 0; boidIndex < boids.length; boidIndex++){
-             this.updateMembership(boids[boidIndex].id, boids[boidIndex].position.x, boids[boidIndex].position.y)
+             this.updateMembership(boidIndex, boids[boidIndex].position.x, boids[boidIndex].position.y)
          }
      }
      pos2bin(x, y){
@@ -76,57 +160,40 @@
         let myBinY = Math.floor(y / BIN_SIZE)
         return { binX: myBinX, binY: myBinY }
     }
-     updateMembership(id, x, y){
+     updateMembership(index, x, y){
          let bins = this.pos2bin(x, y)
-         this.bins[bins.binX][bins.binY].push(id)
+         let binX = constrain(bins.binX, 0, this.binsX - 1)
+         let binY = constrain(bins.binY, 0, this.binsY - 1) // constrain in case boid is off screen for some reason
+        //  if(this.bins[binX][binY] == undefined){
+        //     console.error('bin undefined, dumpin max, then real, bin indices')
+        //     console.log(this.binsX)
+        //     console.log(this.binsY)
+        //     console.log(binX)
+        //     console.log(binY)
+        //     console.log(this.bins)
+        //  }
+         
+         this.bins[binX][binY].push(index)
      }
-     getNearbyIds(radius, x, y){
+     getNearbyBoids(radius, x, y){
         // console.log("boid at " + x + ", " + y)
-        let ids = []
+        let indices = []
          let nwBins = this.pos2bin(x - radius, y - radius)
          let seBins = this.pos2bin(x + radius, y + radius)
          for(let i = nwBins.binX; i <= seBins.binX; i++){
              for(let j = nwBins.binY; j <= seBins.binY; j++){
-                //  console.log("getting boids in bin " + i + ", " + j)
-                 if(i > 0 && j > 0 && i < this.binsX && j < this.binsY && this.bins[i][j].length > 0){
-                    ids = ids.concat(this.bins[i][j])
+                 if(i >= 0 && j >= 0 && i < this.binsX && j < this.binsY && this.bins[i][j].length > 0){    
+                    indices = indices.concat(this.bins[i][j])
                  }
              }
          }
-         return ids
+         let boidsList = []
+         for(let i = 0; i < indices.length; i++){
+             boidsList.push(this.boids[indices[i]])
+         }
+         return boidsList
      }
- }
-
- function computeDistanceMatrix(boids){
-     // SHORTCUT
-     // we'll use MAX_RADIUS to ignore anything that is beyond a bird's distance from the start
-     const MAX_RADIUS = Math.max(SEPARATION_RADIUS, LOCAL_RADIUS)
-
-     let distances = {}
-     for(let i = 0; i < boids.length; i++){
-        distances[boids[i].id] = {}
-     }
-
-     for(let i = 0; i < boids.length; i++){
-        distances[boids[i].id] = {}
-        for(let j = 0; j < boids.length; j++){
-            if(distances[boids[i].id][boids[j].id] != undefined){
-                continue
-            }
-            let d = boids[i].position.dist(boids[j].position)
-            if(d > MAX_RADIUS || boids[i].id == boids[j].id){
-                distances[boids[i].id][boids[j].id] = null;
-                distances[boids[j].id][boids[i].id] = null;
-            } else {
-                distances[boids[i].id][boids[j].id] = d;
-                distances[boids[j].id][boids[i].id] = d;
-            }
-        }
-     }
-     return distances
-
- }
- 
+ } 
  
  /*
  *
@@ -143,35 +210,54 @@
  
  
  class Boid {
-     constructor(){
+     constructor(index){
          this.id = Math.round(Math.random() * 1000000000);
+         this.index = index;
          this.position = createVector(CANVAS_WIDTH * Math.random(), CANVAS_HEIGHT * Math.random())
-         this.velocity = p5.Vector.random2D().mult(SPEED)
+         this.velocity = p5.Vector.random2D().mult(options.SPEED)
          this.acceleration = createVector(0,0)
+         if(this.position.x < 0 || this.position.x > CANVAS_WIDTH){
+             console.warn("Boids created OOB!")
+         }
      }
   
-     getNearbyBoids(boids, horizon){
-        //  console.time('getNearbyBoids')
-         let nearbyBoids = []
-         for(let i = 0; i < boids.length; i++){
-             if(boids[i].id == this.id){
+     getVisibleBoids(boids, horizon){
+        let nearbyBoids = lattice.getNearbyBoids(horizon, this.position.x, this.position.y)
+        //  console.time('getVisibleBoids')
+
+         let visibleBoids = []
+         for(let i = 0; i < nearbyBoids.length; i++){
+             if(nearbyBoids[i].id == this.id){
                  continue;
              }
-             if(this.position.dist(boids[i].position) <= horizon){
+             if(options.LOOKUP_TABLE){
+                if(distances.search(this.index, nearbyBoids[i].index) <= horizon){
 
-                 if(BIRD_VISION){
-                     let angle = this.position.angleBetween(boids[i].position)
-                     if(Math.abs(this.velocity.heading() - angle) >= BIRD_FOV / 2){
-                         continue;
-                     }
-                 }    
-                 nearbyBoids.push(boids[i])
-             }
+                    if(options.LIMIT_FOV){
+                        let angle = this.position.angleBetween(nearbyBoids[i].position)
+                        if(Math.abs(this.velocity.heading() - angle) >= options.FOV / 2){
+                            continue;
+                        }
+                    }    
+                    visibleBoids.push(nearbyBoids[i])
+                }   
+             } else {
+                if(this.position.dist(nearbyBoids[i].position) <= horizon){
+
+                    if(options.LIMIT_FOV){
+                        let angle = this.position.angleBetween(nearbyBoids[i].position)
+                        if(Math.abs(this.velocity.heading() - angle) >= options.FOV / 2){
+                            continue;
+                        }
+                    }    
+                    visibleBoids.push(nearbyBoids[i])
+                }
+            }
          }
-         if(BIRD_VISION && nearbyBoids.length > BIRD_MAX_TRACKING){
-             nearbyBoids.sort((a, b) => {
-                 let distanceToA = distanceMatrix[a.id][this.id]
-                 let distanceToB = distanceMatrix[b.id][this.id]
+         if(options.TRACK_WINGMEN && visibleBoids.length > options.WINGMEN){
+             visibleBoids.sort((a, b) => {
+                 let distanceToA = this.position.dist(a.position)
+                 let distanceToB = this.position.dist(b.position)
                  if(distanceToA < distanceToB){
                      return -1
                  }
@@ -181,12 +267,12 @@
                  return 0
              });
      
-             while(nearbyBoids.length - BIRD_MAX_TRACKING > 0){
-                 nearbyBoids.pop()
+             while(visibleBoids.length - options.WINGMEN > 0){
+                 visibleBoids.pop()
              }
          }
-        //  console.timeEnd('getNearbyBoids')
-         return nearbyBoids;
+        //  console.timeEnd('getvisibleBoids')
+         return visibleBoids;
      }
      
      update(boids){
@@ -199,31 +285,47 @@
  
  
         let bounceDesiredVelocity = this.velocity.copy()
+        let boundaryDistanceX = CANVAS_WIDTH
+        let boundaryDistanceY = CANVAS_HEIGHT
         if(this.position.x <= BOUNDARY_SIZE){
-            bounceDesiredVelocity.x = SPEED
+            boundaryDistanceX = this.position.x
+            bounceDesiredVelocity.x = options.SPEED;
         }
         if((CANVAS_WIDTH - this.position.x) <= BOUNDARY_SIZE){
-            bounceDesiredVelocity.x = -1 * SPEED
+            boundaryDistanceX = (CANVAS_WIDTH - this.position.x)
+            bounceDesiredVelocity.x = -1 * options.SPEED;
         }
         if(this.position.y <= BOUNDARY_SIZE){
-            bounceDesiredVelocity.y = SPEED
+            boundaryDistanceY = this.position.y
+            bounceDesiredVelocity.y = options.SPEED;
         }
         if((CANVAS_HEIGHT - this.position.y) <= BOUNDARY_SIZE){
-            bounceDesiredVelocity.y = -1 * SPEED
+            boundaryDistanceY = (CANVAS_HEIGHT - this.position.y)
+            bounceDesiredVelocity.y = -1 * options.SPEED;
         }
-        let bounceSteeringForce = p5.Vector.sub(bounceDesiredVelocity, this.velocity)
+        let bounceSteeringForce = p5.Vector.sub(bounceDesiredVelocity, this.velocity).div(Math.min(boundaryDistanceX, boundaryDistanceY))
 
-        let localBoids = this.getNearbyBoids(boids, LOCAL_RADIUS)
-        let separationBoids = this.getNearbyBoids(boids, SEPARATION_RADIUS)
+        let localBoids = this.getVisibleBoids(boids, LOCAL_RADIUS)
+        let separationBoids = this.getVisibleBoids(boids, SEPARATION_RADIUS)
 
         // Cohesion + Alignment with the Flock
-        let localCentre = createVector(0,0)
+        let localCentre = createVector(0, 0)
         let cohesionCount = 0;
         let localVelocity = createVector(0,0)
         for(let i = 0; i < localBoids.length; i++){
 
             // only "cohere" towards things not in separation zone
-            if(p5.Vector.dist(this.position, localBoids[i].position) >= SEPARATION_RADIUS){
+            if(options.DONUT_MODE){
+                if(distances.search(this.index, localBoids[i].index) >= SEPARATION_RADIUS){
+                    localCentre.add(localBoids[i].position)
+                    cohesionCount += 1
+                }
+
+                // if(p5.Vector.dist(this.position, localBoids[i].position) >= SEPARATION_RADIUS){
+                //     localCentre.add(localBoids[i].position)
+                //     cohesionCount += 1
+                // }
+            } else {
                 localCentre.add(localBoids[i].position)
                 cohesionCount += 1
             }
@@ -231,29 +333,42 @@
             localVelocity.add(localBoids[i].velocity)
         }
 
-        let separationDesiredVelocity = this.velocity.copy()
         if(cohesionCount > 0){
             localCentre.div(cohesionCount)
-
-            let fleeAcc = createVector()
-            for(let i = 0; i < separationBoids.length; i++){
-                let separation = p5.Vector.sub(this.position, separationBoids[i].position)
-                let distance = separation.mag()
-                fleeAcc.add(separation.normalize().div(distance))
-            }
-            separationDesiredVelocity = fleeAcc.normalize().mult(SPEED)
+        } else {
+            localCentre = this.position.copy()
         }
-        let separationSteeringForce = p5.Vector.sub(separationDesiredVelocity, this.velocity).mult(FORCE_SEPARATION)
 
-        let cohesionDesiredVelocity = p5.Vector.sub(localCentre, this.position).setMag(SPEED)
-        let cohesionSteeringForce = p5.Vector.sub(cohesionDesiredVelocity, this.velocity).mult(FORCE_COHESION)
+        let separationDesiredVelocity = this.velocity.copy()
+        let fleeAcc = createVector()
+        // console.log(separationBoids.length + " boids in separation zone")
+        for(let i = 0; i < separationBoids.length; i++){
+            let separation = p5.Vector.sub(this.position, separationBoids[i].position)
+            let distance = separation.mag()
+            fleeAcc.add(separation.normalize().div(distance))
+        }
+        separationDesiredVelocity = fleeAcc.normalize().mult(options.SPEED)
+
+        let separationSteeringForce = p5.Vector.sub(separationDesiredVelocity, this.velocity).mult(options.FORCE_SEPARATION)
+
+        let cohesionDesiredVelocity = p5.Vector.sub(localCentre, this.position).setMag(options.SPEED)
+        let cohesionSteeringForce = (cohesionCount > 1) ? p5.Vector.sub(cohesionDesiredVelocity, this.velocity).mult(options.FORCE_COHESION) : createVector(0, 0)
 
         let alignmentDesiredVelocity = this.velocity.copy()
         if(localBoids.length > 0){
-            alignmentDesiredVelocity = localVelocity.div(localBoids.length).setMag(SPEED)
+            alignmentDesiredVelocity = localVelocity.div(localBoids.length).setMag(options.SPEED)
         }
         
-        let alignmentSteeringForce = p5.Vector.sub(alignmentDesiredVelocity, this.velocity).mult(FORCE_ALIGNMENT)
+        let alignmentSteeringForce = p5.Vector.sub(alignmentDesiredVelocity, this.velocity).mult(options.FORCE_ALIGNMENT)
+
+        // console.log("Bouncing:" + bounceSteeringForce.mag())
+        // // console.log(bounceSteeringForce)
+        // console.log("Alignment:" + alignmentSteeringForce.mag())
+        // // console.log(alignmentSteeringForce)
+        // console.log("Cohesion:" + cohesionSteeringForce.mag())
+        // // console.log(cohesionSteeringForce)
+        // console.log("Separation:" + separationSteeringForce.mag())
+        // // console.log(separationSteeringForce)
 
         this.acceleration.add(bounceSteeringForce)
         this.acceleration.add(alignmentSteeringForce)
@@ -265,10 +380,17 @@
         // Visual Field
         stroke('#EEEEEE')//'#00FF0033')
         strokeWeight(1)
-        let leftBlinker = this.velocity.copy().rotate(-1* (BIRD_FOV / 2)).setMag(LOCAL_RADIUS)
-        let rightBlinker = this.velocity.copy().rotate(BIRD_FOV / 2).setMag(LOCAL_RADIUS)
+        let leftBlinker = this.velocity.copy().rotate(-1* (options.FOV / 2)).setMag(LOCAL_RADIUS)
+        let rightBlinker = this.velocity.copy().rotate(options.FOV / 2).setMag(LOCAL_RADIUS)
         line(this.position.x, this.position.y, this.position.x + leftBlinker.x, this.position.y + leftBlinker.y)
         line(this.position.x, this.position.y, this.position.x + rightBlinker.x, this.position.y + rightBlinker.y)
+
+        // Steering Force
+        stroke('#AAFF77')
+        strokeWeight(2)
+        let bounceForceLine = bounceSteeringForce.copy().mult(250)
+        line(this.position.x, this.position.y, this.position.x+ bounceForceLine.x, this.position.y+ bounceForceLine.y)
+        
 
         // Cohesion Force
         stroke('#00FF0066')
