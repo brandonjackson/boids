@@ -10,7 +10,7 @@
 
 let options = {}
 
-options.N_BOIDS = 2000
+options.N_BOIDS = 1200
 
 options.FORCE_SEPARATION = 0.05
 options.FORCE_ALIGNMENT = 0.05
@@ -19,8 +19,7 @@ options.FORCE_COHESION = 0.02
 const BIN_SIZE = 50
 const CANVAS_WIDTH = 1400
 const CANVAS_HEIGHT = 700
-const N_BOIDS = 1000
-const DISPLAY_SIZE = 2
+const DISPLAY_SIZE = 6
 
 options.SPEED = 3
 const BOUNDARY_SIZE = DISPLAY_SIZE * 10
@@ -32,7 +31,7 @@ options.FOV = 161
 options.TRACK_WINGMEN = false
 options.WINGMEN = 7
 
-options.DONUT_MODE = true
+options.DONUT_MODE = false
 options.LOOKUP_TABLE = false
 
 let frame = 0
@@ -44,12 +43,13 @@ options.reset = function(){
     for(let i = 0; i < options.N_BOIDS; i++){
         boids.push(new Boid(i))
     }
+    distances = new DistanceLookup(boids)
     // console.log("done with reset()...dumping boids")
     // console.log(boids)
 }
 
   
- const DEBUG_VIZ = false
+options.VISUALIZE_FORCES = true
  
  let boids = []
  let lattice = {}
@@ -68,8 +68,10 @@ options.reset = function(){
         options.reset()
      });
      gui.add(options, 'SPEED', 0, 10)
-     gui.add(options, 'DONUT_MODE')
-     gui.add(options, 'LOOKUP_TABLE')
+    //  gui.add(options, 'DONUT_MODE')
+    //  gui.add(options, 'LOOKUP_TABLE')
+     gui.add(options, 'VISUALIZE_FORCES')
+
      gui.add(options, 'reset')
 
 
@@ -110,12 +112,23 @@ options.reset = function(){
 
     clear()
     lattice = new BinLattice(boids)
-    distances = new DistanceLookup(boids)
+    
  
      for(let i = 0; i < boids.length; i++){
         boids[i].update(boids)
         boids[i].display()
      }
+
+     if(options.VISUALIZE_FORCES){
+        strokeWeight(0)
+        fill('rgba(255,255,0, 0.05)')
+        rect(0,0,CANVAS_WIDTH, BOUNDARY_SIZE)
+        rect(0,0,BOUNDARY_SIZE, CANVAS_HEIGHT)
+        rect(0,CANVAS_HEIGHT - BOUNDARY_SIZE,CANVAS_WIDTH, BOUNDARY_SIZE)
+
+        rect(CANVAS_WIDTH - BOUNDARY_SIZE, 0 ,BOUNDARY_SIZE, CANVAS_HEIGHT)
+    }
+
      
  }
 
@@ -375,10 +388,10 @@ options.reset = function(){
         this.acceleration.add(cohesionSteeringForce)
         this.acceleration.add(separationSteeringForce)
 
-        if(DEBUG_VIZ){
+        if(options.VISUALIZE_FORCES){
             
         // Visual Field
-        stroke('#EEEEEE')//'#00FF0033')
+        stroke('#CCCCCC33')//'#00FF0033')
         strokeWeight(1)
         let leftBlinker = this.velocity.copy().rotate(-1* (options.FOV / 2)).setMag(LOCAL_RADIUS)
         let rightBlinker = this.velocity.copy().rotate(options.FOV / 2).setMag(LOCAL_RADIUS)
@@ -386,7 +399,7 @@ options.reset = function(){
         line(this.position.x, this.position.y, this.position.x + rightBlinker.x, this.position.y + rightBlinker.y)
 
         // Steering Force
-        stroke('#AAFF77')
+        stroke('#FFFF00')
         strokeWeight(2)
         let bounceForceLine = bounceSteeringForce.copy().mult(250)
         line(this.position.x, this.position.y, this.position.x+ bounceForceLine.x, this.position.y+ bounceForceLine.y)
@@ -394,8 +407,8 @@ options.reset = function(){
 
         // Cohesion Force
         stroke('#00FF0066')
-        strokeWeight(1)
-        let cohesionForceLine = cohesionSteeringForce.copy().mult(250)
+        strokeWeight(2)
+        let cohesionForceLine = cohesionSteeringForce.copy().mult(100)
         line(this.position.x, this.position.y, this.position.x+ cohesionForceLine.x, this.position.y+ cohesionForceLine.y)
 
         // Cohesion Centre
@@ -405,15 +418,15 @@ options.reset = function(){
 
         // Alignment Force
         stroke('#0000FF66')
-        strokeWeight(1)
-        let alignmentForceLine = alignmentSteeringForce.copy().mult(250)
+        strokeWeight(2)
+        let alignmentForceLine = alignmentSteeringForce.copy().mult(100)
         line(this.position.x, this.position.y, this.position.x+ alignmentForceLine.x, this.position.y+ alignmentForceLine.y)
 
         // Separation Force
-            stroke('red')
-            strokeWeight(2)
-            let drawingAccelerationLine = this.acceleration.copy().mult(100)
-            line(this.position.x, this.position.y, this.position.x - drawingAccelerationLine.x, this.position.y - drawingAccelerationLine.y)
+        stroke('red')
+        strokeWeight(2)
+        let drawingAccelerationLine = this.acceleration.copy().mult(100)
+        line(this.position.x, this.position.y, this.position.x - drawingAccelerationLine.x, this.position.y - drawingAccelerationLine.y)
 
         }
 
